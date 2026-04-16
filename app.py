@@ -4,69 +4,66 @@ from dotenv import load_dotenv
 load_dotenv()
 
 import streamlit as st
-from langchain_core.messages import HumanMessage, AIMessage, ToolMessage
-from langchain_groq import ChatGroq
-from langgraph.prebuilt import create_react_agent
+from langchain_core.messages import HumanMessage
+from core.graph import create_graph, create_simple_graph
 from core.state import AgentState
-from core.graph import create_graph
-from tools.code_executor import execute_python_code
-from tools.news_fetcher import get_news_tool
 
-st.set_page_config(page_title="Stateful Agentic AI", page_icon="🤖", layout="wide")
+st.set_page_config(page_title="Proactive AI Agent", page_icon="🤖", layout="wide")
 
-st.title("🤖 Stateful Agentic AI System")
+st.title("🤖 Proactive Stateful Agentic AI")
 st.markdown("---")
 
 
 def init_session():
-    if "chat_history" not in st.session_state:
-        st.session_state.chat_history = []
-    if "tool_history" not in st.session_state:
-        st.session_state.tool_history = []
-    if "thread_id" not in st.session_state:
-        st.session_state.thread_id = "default"
+    defaults = {
+        "chat_history": [],
+        "tool_history": [],
+        "suggestions": [],
+        "current_plan": None,
+        "thread_id": "default",
+        "proactive_mode": True,
+    }
+    for key, value in defaults.items():
+        if key not in st.session_state:
+            st.session_state[key] = value
 
 
-def get_llm(temperature=0.5):
-    return ChatGroq(model="llama-3.3-70b-versatile", temperature=temperature)
+def get_graph():
+    if st.session_state.proactive_mode:
+        return create_graph()
+    return create_simple_graph()
 
 
-def get_tool_agent():
-    model = get_llm(temperature=0.3)
-    tools = [execute_python_code, get_news_tool()]
-    return create_react_agent(model, tools)
+def display_suggestions():
+    if st.session_state.suggestions:
+        st.markdown("**💡 Suggestions:**")
+        cols = st.columns(len(st.session_state.suggestions))
+        for i, (col, suggestion) in enumerate(zip(cols, st.session_state.suggestions)):
+            with col:
+                if st.button(f"→ {suggestion[:40]}...", key=f"sug_{i}"):
+                    st.session_state.chat_history.append(
+                        {"role": "user", "content": suggestion}
+                    )
+                    st.rerun()
 
 
-def get_chatbot():
-    return create_graph()
+def display_plan_progress():
+    if st.session_state.current_plan:
+        with st.expander("📋 Current Plan Progress", expanded=True):
+            for step in st.session_state.current_plan:
+                status_emoji = {
+                    "pending": "⏳",
+                    "in_progress": "🔄",
+                    "completed": "✅",
+                    "failed": "❌",
+                }.get(step.get("status", "pending"), "⚪")
+                st.text(f"{status_emoji} Step {step['step_number']}: {step['task']}")
 
 
 def display_messages():
     for msg in st.session_state.chat_history:
-        role = msg.get("role", "assistant")
-        content = msg.get("content", "")
-
-        with st.chat_message(role):
-            if isinstance(content, str):
-                st.markdown(content)
-            else:
-                st.json(content)
-
-
-def display_tool_history():
-    if st.session_state.tool_history:
-        with st.expander("🔧 Tool Executions", expanded=True):
-            for i, tool in enumerate(st.session_state.tool_history, 1):
-                st.text(f"{i}. {tool['name']}")
-                st.code(
-                    tool["input"][:200] + "..."
-                    if len(tool["input"]) > 200
-                    else tool["input"],
-                    language="python",
-                )
-                if tool.get("output"):
-                    st.text(f"Output: {tool['output'][:300]}...")
-                st.markdown("---")
+        with st.chat_message(msg["role"]):
+            st.markdown(msg["content"])
 
 
 init_session()
@@ -74,7 +71,7 @@ init_session()
 with st.sidebar:
     st.header("⚙️ Settings")
 
-    mode = st.selectbox("Select Mode", ["💬 Chatbot", "🔧 Tool Agent"], index=0)
+    st.session_state.proactive_mode = st.toggle("🚀 Proactive Mode", value=True)
 
     st.markdown("---")
 
@@ -82,85 +79,63 @@ with st.sidebar:
     if new_thread != st.session_state.thread_id:
         st.session_state.thread_id = new_thread
         st.session_state.chat_history = []
-        st.session_state.tool_history = []
+        st.session_state.current_plan = None
         st.rerun()
 
     st.markdown("---")
 
     if st.button("🗑️ Clear Chat", use_container_width=True):
         st.session_state.chat_history = []
-        st.session_state.tool_history = []
+        st.session_state.current_plan = None
+        st.session_state.suggestions = []
         st.rerun()
 
     st.markdown("---")
-    st.markdown("**API Status**")
-    api_key = os.getenv("GROQ_API_KEY")
-    if api_key:
-        st.success(f"✅ Groq: Connected")
-    else:
-        st.error("❌ Groq: No API Key")
-
-    tavily_key = os.getenv("TAVILY_API_KEY")
-    if tavily_key:
-        st.success(f"✅ Tavily: Connected")
-    else:
-        st.warning("⚠️ Tavily: Not configured")
-
-col_main, col_tools = st.columns([3, 1])
-
-with col_main:
-    display_messages()
-
-    if prompt := st.chat_input("Ask me anything..."):
-        st.session_state.chat_history.append({"role": "user", "content": prompt})
-
-        with st.chat_message("user"):
-            st.markdown(prompt)
-
-        with st.spinner("🤔 Thinking..."):
-            try:
-                if mode == "💬 Chatbot":
-                    app = get_chatbot()
-                    config = {"configurable": {"thread_id": st.session_state.thread_id}}
-                    response = app.invoke(
-                        {"messages": [HumanMessage(content=prompt)]}, config
-                    )
-                    response_text = response["messages"][-1].content
-                else:
-                    app = get_tool_agent()
-                    response = app.invoke({"messages": [HumanMessage(content=prompt)]})
-                    response_text = response["messages"][-1].content
-
-                    for msg in response["messages"]:
-                        if hasattr(msg, "type") and msg.type == "tool":
-                            st.session_state.tool_history.append(
-                                {
-                                    "name": "tool",
-                                    "input": str(msg.content),
-                                    "output": "",
-                                }
-                            )
-
-                st.session_state.chat_history.append(
-                    {"role": "assistant", "content": response_text}
-                )
-
-                with st.chat_message("assistant"):
-                    st.markdown(response_text)
-
-            except Exception as e:
-                error_msg = f"⚠️ Error: {str(e)}"
-                st.session_state.chat_history.append(
-                    {"role": "assistant", "content": error_msg}
-                )
-                st.error(error_msg)
-
-with col_tools:
-    st.header("📊 Activity")
+    st.markdown("**📊 Activity**")
     st.metric("Messages", len(st.session_state.chat_history))
-    st.metric("Tools Used", len(st.session_state.tool_history))
 
-    if st.session_state.tool_history:
-        with st.expander("🔧 Tool History", expanded=False):
-            for i, tool in enumerate(st.session_state.tool_history, 1):
-                st.text(f"{i}. {tool['name']}")
+    mode_status = "Proactive" if st.session_state.proactive_mode else "Reactive"
+    st.info(f"Mode: {mode_status}")
+
+    st.markdown("---")
+    st.markdown("**🔑 API Status**")
+    if os.getenv("GROQ_API_KEY"):
+        st.success("✅ Groq Connected")
+    else:
+        st.error("❌ No API Key")
+
+display_plan_progress()
+display_suggestions()
+display_messages()
+
+if prompt := st.chat_input("Ask me anything..."):
+    st.session_state.chat_history.append({"role": "user", "content": prompt})
+
+    with st.chat_message("user"):
+        st.markdown(prompt)
+
+    with st.spinner("🤔 Thinking..."):
+        try:
+            app = get_graph()
+            config = {"configurable": {"thread_id": st.session_state.thread_id}}
+
+            result = app.invoke({"messages": [HumanMessage(content=prompt)]}, config)
+
+            response = result["messages"][-1].content
+
+            if "suggestions" in result and result["suggestions"]:
+                st.session_state.suggestions = result["suggestions"]
+
+            if "current_plan" in result and result["current_plan"]:
+                st.session_state.current_plan = result["current_plan"]
+
+        except Exception as e:
+            response = f"⚠️ Error: {str(e)}"
+
+    st.session_state.chat_history.append({"role": "assistant", "content": response})
+
+    with st.chat_message("assistant"):
+        st.markdown(response)
+
+    if st.session_state.suggestions:
+        st.rerun()

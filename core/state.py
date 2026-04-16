@@ -2,11 +2,24 @@ import operator
 from typing import Annotated, Sequence, TypedDict
 from langchain_core.messages import BaseMessage
 
+
 class AgentState(TypedDict):
     """
-    Represents the state of our graph.
-    The `messages` key is a list of messages. The `add_messages` reducer (or `operator.add`) 
-    will append new messages to this list.
+    Represents the state of our proactive agent graph.
     """
+
     messages: Annotated[Sequence[BaseMessage], operator.add]
-    # We can add other state keys here later, e.g., 'current_intent' or 'context'
+
+    intent: str
+
+    context: dict
+
+    current_plan: list[dict] | None
+
+    execution_mode: str
+
+    suggestions: list[str]
+
+    task_history: list[dict]
+
+    retry_count: int
