@@ -49,15 +49,21 @@ def intent_detector_node(state: AgentState) -> dict:
 
 def route_based_on_intent(
     state: AgentState,
-) -> Literal["chatbot", "tool_agent", "news_agent"]:
+) -> Literal["chatbot", "planner"]:
     """
     Routes to the appropriate agent based on detected intent.
+    News/code/complex requests go to planner -> tool_agent.
+    Simple chat goes to chatbot.
     """
     intent = state.get("intent", "simple_chat")
 
-    if "code" in intent or "complex" in intent:
-        return "tool_agent"
-    elif "news" in intent or "information" in intent or "research" in intent:
-        return "news_agent"
+    if (
+        "code" in intent
+        or "complex" in intent
+        or "news" in intent
+        or "information" in intent
+        or "research" in intent
+    ):
+        return "planner"
     else:
         return "chatbot"
